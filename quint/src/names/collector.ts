@@ -62,11 +62,11 @@ export class NameCollector implements IRVisitor {
   }
 
   enterVar(def: QuintVar): void {
-    this.collectDefinition(def.name, { kind: def.kind, reference: def.id, typeAnnotation: def.typeAnnotation })
+    this.collectDefinition(def.name, def)
   }
 
   enterConst(def: QuintConst): void {
-    this.collectDefinition(def.name, { kind: def.kind, reference: def.id, typeAnnotation: def.typeAnnotation })
+    this.collectDefinition(def.name, def)
   }
 
   enterOpDef(def: QuintOpDef): void {
@@ -75,7 +75,7 @@ export class NameCollector implements IRVisitor {
     // that we collect type annotations here.
     if (this.definitionDepth === 0) {
       // collect only top-level definitions
-      this.collectDefinition(def.name, { kind: def.kind, reference: def.id })
+      this.collectDefinition(def.name, { ...def, typeAnnotation: undefined, depth: this.definitionDepth })
     }
 
     this.definitionDepth++
@@ -86,11 +86,11 @@ export class NameCollector implements IRVisitor {
   }
 
   enterTypeDef(def: QuintTypeDef): void {
-    this.collectDefinition(def.name, { kind: 'type', reference: def.id, typeAnnotation: def.type })
+    this.collectDefinition(def.name, def)
   }
 
   enterAssume(def: QuintAssume): void {
-    this.collectDefinition(def.name, { kind: 'assumption', reference: def.id })
+    this.collectDefinition(def.name, def)
   }
 
   enterInstance(def: QuintInstance): void {
@@ -110,12 +110,6 @@ export class NameCollector implements IRVisitor {
     }
 
     const instanceTable = new Map([...moduleTable.entries()])
-    if (def.qualifiedName) {
-      // Add the qualifier to `definitionsMyModule` map with a copy of the
-      // definitions, so if there is an export of that qualifier, we know which
-      // definitions to export
-      this.definitionsByModule.set(def.qualifiedName, instanceTable)
-    }
 
     // For each override, check if the name exists in the instantiated module and is a constant.
     // If so, update the value definition to point to the expression being overriden
@@ -133,12 +127,29 @@ export class NameCollector implements IRVisitor {
       }
 
       // Update the definition to point to the expression being overriden
-      instanceTable.set(param.name, { ...constDef, reference: ex.id })
+      instanceTable.set(param.name, {
+        ...constDef,
+        kind: 'def',
+        qualifier: 'pureval',
+        expr: ex,
+        hidden: false,
+      })
     })
 
     // All names from the instanced module should be acessible with the instance namespace
     // So, copy them to the current module's lookup table
     const newDefs = copyNames(instanceTable, def.qualifiedName, true)
+    if (def.qualifiedName) {
+      // Add the qualifier to `definitionsMyModule` map with a copy of the
+      // definitions, so if there is an export of that qualifier, we know which
+      // definitions to export
+      this.definitionsByModule.set(def.qualifiedName, newDefs)
+    }
+    // add info to know where this def came from
+    newDefs.forEach((d, _name) => {
+      d.importedFrom ??= def
+    })
+
     this.collectDefinitions(newDefs)
   }
 
@@ -170,7 +181,11 @@ export class NameCollector implements IRVisitor {
 
     if (!def.defName || def.defName === '*') {
       // Imports all definitions
-      this.collectDefinitions(importableDefinitions)
+      // add info to know where this def came from
+      const withImportFrom = new Map(
+        [...importableDefinitions.entries()].map(([k, d]) => [k, { ...d, importedFrom: def }])
+      )
+      this.collectDefinitions(withImportFrom)
       return
     }
 
@@ -180,6 +195,8 @@ export class NameCollector implements IRVisitor {
       this.errors.push(nameNotFoundError(def))
       return
     }
+    // add info to know where this def came from
+    newDef.importedFrom ??= def
 
     this.collectDefinition(def.defName, newDef, def.id)
   }
@@ -207,7 +224,10 @@ export class NameCollector implements IRVisitor {
 
     if (!def.defName || def.defName === '*') {
       // Export all definitions
-      this.collectDefinitions(exportableDefinitions)
+      const withImportFrom = new Map(
+        [...exportableDefinitions.entries()].map(([k, d]) => [k, { ...d, importedFrom: def }])
+      )
+      this.collectDefinitions(withImportFrom)
       return
     }
 
@@ -219,7 +239,10 @@ export class NameCollector implements IRVisitor {
       return
     }
 
-    this.collectDefinition(def.defName, newDef, def.id)
+    // add info to know where this def came from
+    // newDef.importedFrom = def
+
+    this.collectDefinition(def.defName, { ...newDef, importedFrom: def }, def.id)
   }
 
   /** Public interface to manipulate the collected definitions. Used by
@@ -243,13 +266,13 @@ export class NameCollector implements IRVisitor {
 
     if (builtinNames.includes(identifier)) {
       // Conflict with a built-in name
-      this.recordConflict(identifier, undefined, source ?? def.reference)
+      this.recordConflict(identifier, undefined, source ?? def.id)
       return
     }
 
-    if (this.definitionsByName.has(identifier) && this.definitionsByName.get(identifier)!.reference != def.reference) {
+    if (this.definitionsByName.has(identifier) && this.definitionsByName.get(identifier)!.id != def.id) {
       // Conflict with a previous definition
-      this.recordConflict(identifier, this.definitionsByName.get(identifier)!.reference, source ?? def.reference)
+      this.recordConflict(identifier, this.definitionsByName.get(identifier)!.id, source ?? def.id)
       return
     }
 
@@ -280,8 +303,8 @@ export class NameCollector implements IRVisitor {
   private collectDefinitions(newDefs: DefinitionsByName): void {
     newDefs.forEach((def, identifier) => {
       const existingEntry = this.definitionsByName.get(identifier)
-      if (existingEntry && existingEntry.reference !== def.reference) {
-        this.recordConflict(identifier, existingEntry.reference, def.reference)
+      if (existingEntry && existingEntry.id !== def.id) {
+        this.recordConflict(identifier, existingEntry.id, def.id)
       }
     })
 

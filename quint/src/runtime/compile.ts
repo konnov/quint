@@ -26,7 +26,7 @@ import { AnalysisOutput, analyzeInc, analyzeModules } from '../quintAnalyzer'
 import { mkErrorMessage } from '../cliCommands'
 import { IdGenerator, newIdGenerator } from '../idGenerator'
 import { SourceLookupPath } from '../parsing/sourceResolver'
-import { addDefToFlatModule, flattenModules } from '../flattening'
+import { flattenModules } from '../flattening'
 import { Rng } from '../rng'
 
 /**
@@ -68,6 +68,7 @@ export interface CompilationState {
   modules: FlatModule[]
   // The source map for the compiled code.
   sourceMap: Map<bigint, Loc>
+  // definitionsByModule: DefinitionsByModule
   // The output of the Quint analyzer.
   analysisOutput: AnalysisOutput
 }
@@ -79,6 +80,7 @@ export function newCompilationState(): CompilationState {
     originalModules: [],
     modules: [],
     sourceMap: new Map(),
+    // definitionsByModule: new Map(),
     analysisOutput: {
       types: new Map(),
       effects: new Map(),
@@ -226,19 +228,25 @@ export function compileDef(
     .map(({ table }) => {
       const [analysisErrors, analysisOutput] = analyzeInc(state.analysisOutput, table, def)
 
-      const { flattenedModule, flattenedDefs, flattenedTable, flattenedAnalysis } = addDefToFlatModule(
-        modules,
-        table,
-        state.idGen,
-        state.sourceMap,
-        analysisOutput,
-        lastModule,
-        def
-      )
+      // const { flattenedModule, flattenedDefs, flattenedTable, flattenedAnalysis } = addDefToFlatModule(
+      //   modules,
+      //   table,
+      //   state.idGen,
+      //   state.sourceMap,
+      //   analysisOutput,
+      //   lastModule,
+      //   def
+      // )
 
-      const flatModules: FlatModule[] = [...state.modules]
-      flatModules.pop()
-      flatModules.push(flattenedModule)
+      // const flatModules: FlatModule[] = [...state.modules]
+      // flatModules.pop()
+      // flatModules.push(flattenedModule)
+
+      const {
+        flattenedModules: flatModules,
+        flattenedTable,
+        flattenedAnalysis,
+      } = flattenModules(originalModules, table, state.idGen, state.sourceMap, analysisOutput)
 
       const newState = {
         ...state,
@@ -246,7 +254,7 @@ export function compileDef(
         modules: flatModules,
         originalModules: originalModules,
       }
-      const ctx = compile(newState, evaluationState, flattenedTable, rng.next, flattenedDefs)
+      const ctx = compile(newState, evaluationState, flattenedTable, rng.next, flatModules[flatModules.length - 1].defs)
 
       const errorLocator = mkErrorMessage(state.sourceMap)
       return {

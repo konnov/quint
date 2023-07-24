@@ -309,18 +309,17 @@ export class ConstraintGeneratorVisitor implements IRVisitor {
     } else {
       const def = this.table.get(nameId)
 
-      // FIXME: We have to check if the annotation is too general for var and consts as well
-      // https://github.com/informalsystems/quint/issues/691
-      if (def?.typeAnnotation) {
-        return right(def.typeAnnotation)
-      }
-
-      const id = def?.reference
-      if (!def || !id) {
+      if (!def) {
         return left(buildErrorLeaf(this.location, `Signature not found for name: ${name}`))
       }
 
-      return this.fetchResult(id).map(t => this.newInstance(t))
+      // FIXME: We have to check if the annotation is too general for var and consts as well
+      // https://github.com/informalsystems/quint/issues/691
+      if (isAnnotatedDef(def)) {
+        return right(def.typeAnnotation)
+      }
+
+      return this.fetchResult(def.id).map(t => this.newInstance(t))
     }
   }
 

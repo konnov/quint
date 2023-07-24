@@ -162,6 +162,7 @@ export interface QuintOpDef extends WithId, WithOptionalTypeAnnotation, WithOpti
   qualifier: OpQualifier
   /** expression to be associated with the definition */
   expr: QuintEx
+  depth?: number
 }
 
 export interface QuintConst extends WithId, WithTypeAnnotation {

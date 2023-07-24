@@ -88,7 +88,7 @@ export function toposort<T extends WithId>(inEdges: Edges, unsorted: T[]): Eithe
     return left(Set(edges.keys()))
   } else {
     if (sorted.length != unsorted.length) {
-      console.error(`sorted.length == ${sorted.length}, whereas unsorted.length == ${unsorted.length}`)
+      // console.error(`sorted.length == ${sorted.length}, whereas unsorted.length == ${unsorted.length}`)
     }
     return right(sorted.map(id => idToNode.get(id)!))
   }
