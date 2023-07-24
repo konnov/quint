@@ -1044,7 +1044,9 @@ export class CompilerVisitor implements IRVisitor {
     if (nextvar) {
       this.compStack.push(rhs)
       this.applyFun(sourceId, 1, value => {
+        console.log(nextvar)
         nextvar.registerValue = just(value)
+        console.log(nextvar)
         return just(rv.mkBool(true))
       })
     } else {

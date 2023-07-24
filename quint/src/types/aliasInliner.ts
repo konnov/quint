@@ -16,7 +16,7 @@
 import { IRTransformer, transformDefinition, transformModule, transformType } from '../IRTransformer'
 import { Definition, LookupTable } from '../names/base'
 import { AnalysisOutput } from '../quintAnalyzer'
-import { QuintDef, QuintModule, isAnnotatedDef } from '../quintIr'
+import { QuintDef, QuintModule } from '../quintIr'
 import { QuintType } from '../quintTypes'
 
 /**
@@ -36,17 +36,20 @@ export function inlineTypeAliases(
   const modulesWithInlinedAliases = modules.map(m => inlineAliasesInModule(m, table))
   const tableWithInlinedAliases = new Map(
     [...table.entries()].map(([id, def]): [bigint, Definition] => {
-      if (isAnnotatedDef(def)) {
-        const inlinedType = inlineAliasesInType(def.typeAnnotation, table)
-        return [id, { ...def, typeAnnotation: inlinedType }]
+      if (def.kind === 'param') {
+        return [id, def]
       }
 
-      if (def.kind === 'typedef' && def.type) {
-        const inlinedType = inlineAliasesInType(def.type, table)
-        return [id, { ...def, type: inlinedType }]
-      }
+      return [id, inlineAliasesInDef(def, table)]
+      // if (isAnnotatedDef(def)) {
+      //   const inlinedType = inlineAliasesInType(def.typeAnnotation, table)
+      //   return [id, { ...def, typeAnnotation: inlinedType }]
+      // }
 
-      return [id, def]
+      // if (def.kind === 'typedef' && def.type) {
+      //   const inlinedType = inlineAliasesInType(def.type, table)
+      //   return [id, { ...def, type: inlinedType }]
+      // }
     })
   )
 

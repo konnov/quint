@@ -37,7 +37,7 @@ export type DefinitionsByName = Map<string, Definition>
 
 export type Definition = (QuintDef | ({ kind: 'param' } & QuintLambdaParameter)) & {
   hidden?: boolean
-  namespace?: string
+  namespaces?: string[]
   importedFrom?: QuintImport | QuintInstance | QuintExport
 }
 /**

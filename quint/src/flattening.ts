@@ -60,17 +60,39 @@ export function flattenModules(
   // Inline type aliases
   const inlined = inlineTypeAliases(modules, table, analysisOutput)
 
-  modules.forEach(m => console.log(moduleToString(m)))
+  // console.log('--- inlined -----')
+  // inlined.modules.forEach(m => console.log(moduleToString(m)))
+  // console.log('--- END inlined -----')
+
+  const flattener1 = new FlattenerVisitor(inlined.table)
+  inlined.modules.forEach(m => {
+    walkModule(flattener1, m)
+    m.defs = m.defs.filter(d => d.kind !== 'import' && d.kind !== 'export')
+  })
+
+  // remove duplicates, probably don't need toposorting here
+  // const renamedModules = parsePhase4toposort({ modules: inlined.modules, table: inlined.table, sourceMap }).unwrap()
+  // .modules
+  const renamedModules = inlined.modules.map(module => {
+    // remove duplicates
+    const defs = new Map<string, QuintDef>(module.defs.filter(isFlat).map(d => [d.name, d]))
+    return { ...module, defs: Array.from(defs.values()).concat(module.defs.filter(d => !isFlat(d))) }
+  })
+  // const renamedModules = renameToCanonical(table, inlined.modules)
+
+  // console.log('--- modules to pre flatten -----')
+  // renamedModules.forEach(m => console.log(moduleToString(m)))
+  // console.log('--- END modules to pre flatten -----')
 
   const preFlattener = new PreFlattener(
-    new Map(inlined.modules.map(m => [m.name, m])),
+    new Map(renamedModules.map(m => [m.name, m])),
     idGenerator,
     inlined.table,
     sourceMap,
     inlined.analysisOutput
   )
   const preFlattenedModules: QuintModule[] = []
-  inlined.modules.forEach(module => {
+  renamedModules.forEach(module => {
     const newModule = transformModule(preFlattener, module)
     preFlattener.newModules.forEach(mod => {
       if (!preFlattenedModules.some(m => m.name === mod.name)) {
@@ -83,9 +105,9 @@ export function flattenModules(
   })
   const modulesToFlatten = preFlattenedModules
 
-  console.log('--- modules to flatten -----')
-  modulesToFlatten.forEach(m => console.log(moduleToString(m)))
-  console.log('--- END modules to flatten -----')
+  // console.log('--- modules to flatten -----')
+  // modulesToFlatten.forEach(m => console.log(moduleToString(m)))
+  // console.log('--- END modules to flatten -----')
 
   const result = parsePhase3importAndNameResolution({
     modules: modulesToFlatten,
@@ -102,20 +124,20 @@ export function flattenModules(
   // const { table: newModulesTable } = result.unwrap()
   // const newTable = new Map([...newModulesTable, ...table])
 
-  const flattener = new FlattenerVisitor(newTable)
+  const flattener = new FlattenerVisitor(newTable, true)
   preFlattenedModules.forEach(m => {
     walkModule(flattener, m)
   })
 
   // Rename to canonical names
   // const renamedModules = renameToCanonical(newTable, resolvedModules)
-  const renamedModules = preFlattenedModules
+  // const renamedModules = preFlattenedModules
 
   // console.log('--- renamed modules -----')
   // renamedModules.forEach(m => console.log(moduleToString(m)))
   // console.log('--- END renamed modules -----')
 
-  const result2 = parsePhase4toposort({ modules: renamedModules, table: newTable, sourceMap })
+  const result2 = parsePhase4toposort({ modules: preFlattenedModules, table: newTable, sourceMap })
   // inline aliases later
   if (result2.isLeft()) throw new Error('Flattening failed: ' + result2.value.map(e => e.explanation))
 
@@ -161,7 +183,14 @@ export function addDefToFlatModule(
   flattenedTable: LookupTable
   flattenedAnalysis: AnalysisOutput
 } {
-  modules.forEach(m => console.log(moduleToString(m)))
+  // modules.forEach(m => console.log(moduleToString(m)))
+  const flattener1 = new FlattenerVisitor(table)
+  modules.forEach(m => {
+    walkModule(flattener1, m)
+    m.defs = m.defs.filter(d => d.kind !== 'import' && d.kind !== 'export')
+    const defs = new Map<string, QuintDef>(m.defs.filter(isFlat).map(d => [d.name, d]))
+    m.defs = Array.from(defs.values()).concat(m.defs.filter(d => !isFlat(d)))
+  })
   const preFlattener = new PreFlattener(
     new Map(modules.map(m => [m.name, m])),
     idGenerator,
@@ -183,9 +212,9 @@ export function addDefToFlatModule(
 
   modulesToFlatten.pop()
   modulesToFlatten.push({ ...module, defs: [...module.defs, preFlattenedDef] })
-  console.log('--- [INC] modules to flatten -----')
-  modulesToFlatten.forEach(m => console.log(moduleToString(m)))
-  console.log('--- [INC] END modules to flatten -----')
+  // console.log('--- [INC] modules to flatten -----')
+  // modulesToFlatten.forEach(m => console.log(moduleToString(m)))
+  // console.log('--- [INC] END modules to flatten -----')
   let newTable: LookupTable
   if (isFlat(preFlattenedDef)) {
     newTable = table
@@ -204,9 +233,9 @@ export function addDefToFlatModule(
     newTable = result.unwrap().table
   }
 
-  const flattener = new FlattenerVisitor(newTable)
+  const flattener = new FlattenerVisitor(newTable, true)
   walkDefinition(flattener, preFlattenedDef)
-  const flattenedDefs = Array.from(flattener.defsToAdd)
+  const flattenedDefs = Array.from(flattener.defsToAdd.values())
     .concat(preFlattenedDef)
     .map(d => inlineAliasesInDef(d, table) as FlatDef)
 
@@ -233,29 +262,31 @@ export function addDefToFlatModule(
 }
 
 class FlattenerVisitor implements IRVisitor {
-  defsToAdd: Set<QuintDef> = new Set()
+  defsToAdd: Map<string, QuintDef> = new Map()
   private flattener: Flatenner
 
   private lookupTable: LookupTable
   private currentModuleName?: string
   private namespaceForNested?: string
+  private flattenInstances: boolean
 
-  private getNamespaceForDef(name: string): string | undefined {
-    return name.split('::').slice(0, -1).join('::')
-  }
+  // private getNamespaceForDef(name: string): string | undefined {
+  //   return name.split('::').slice(0, -1).join('::')
+  // }
 
-  constructor(lookupTable: LookupTable) {
+  constructor(lookupTable: LookupTable, flattenInstances: boolean = false) {
     this.lookupTable = lookupTable
     this.flattener = new Flatenner()
+    this.flattenInstances = flattenInstances
   }
 
   enterModule(quintModule: QuintModule) {
-    this.defsToAdd = new Set()
+    this.defsToAdd = new Map()
     this.currentModuleName = quintModule.name
   }
 
   exitModule(quintModule: QuintModule) {
-    quintModule.defs.push(...this.defsToAdd)
+    quintModule.defs.push(...this.defsToAdd.values())
     // quintModule.defs.push(...[...this.defsToAdd].filter(d => d.kind !== 'const' && isFlat(d)))
     // quintModule.defs = quintModule.defs.filter(isFlat)
   }
@@ -266,12 +297,20 @@ class FlattenerVisitor implements IRVisitor {
       return
     }
 
-    const namespace = this.namespaceForNested ?? this.getNamespaceForDef(name.name)
-    const newDef = def
-    // isFlat(def) && namespace && !def.name.startsWith(namespace)
-    //   ? this.flattener.addNamespaceToDef(namespace, def)
-    //   : def
-    this.defsToAdd.add(newDef)
+    if (
+      !isFlat(def) ||
+      (def.importedFrom?.kind === 'instance' && !this.flattenInstances) //||
+      // (def.importedFrom?.kind !== 'instance' && this.flattenInstances)
+    ) {
+      return
+    }
+
+    const namespace = this.namespaceForNested ?? getNamespaceForDef(def)
+
+    const newDef = (
+      namespace && !def.name.startsWith(namespace) ? this.flattener.addNamespaceToDef(namespace, def) : def
+    ) as FlatDef
+    this.defsToAdd.set(newDef.name, newDef)
 
     const old = this.namespaceForNested
     this.namespaceForNested = namespace
@@ -285,12 +324,22 @@ class FlattenerVisitor implements IRVisitor {
       return
     }
 
-    const namespace = this.namespaceForNested ?? this.getNamespaceForDef(expr.opcode)
-    const newDef = def
-    // isFlat(def) && namespace && !def.name.startsWith(namespace)
-    //   ? this.flattener.addNamespaceToDef(namespace, def)
-    //   : def
-    this.defsToAdd.add(newDef)
+    // const namespace = this.namespaceForNested ?? this.getNamespaceForDef(expr.opcode)
+    // const newDef = def
+
+    if (
+      !isFlat(def) ||
+      (def.importedFrom?.kind === 'instance' && !this.flattenInstances) // ||
+      // (def.importedFrom?.kind !== 'instance' && this.flattenInstances)
+    ) {
+      return
+    }
+
+    const namespace = this.namespaceForNested ?? getNamespaceForDef(def)
+    const newDef = (
+      namespace && !def.name.startsWith(namespace) ? this.flattener.addNamespaceToDef(namespace, def) : def
+    ) as FlatDef
+    this.defsToAdd.set(newDef.name, newDef)
 
     const old = this.namespaceForNested
     this.namespaceForNested = namespace
@@ -299,14 +348,31 @@ class FlattenerVisitor implements IRVisitor {
   }
 
   enterInstance(instance: QuintInstance) {
+    if (!this.flattenInstances) {
+      return
+    }
+
     instance.overrides.forEach(([param, _]) => {
       const def = this.lookupTable.get(param.id)
       if (!def || def.kind === 'param') {
         return
       }
-      this.defsToAdd.add(def)
+      if (!isFlat(def)) {
+        return
+      }
+      this.defsToAdd.set(def.name, def)
     })
   }
+}
+
+function getNamespaceForDef(def?: Definition): string | undefined {
+  // builtin, param, import/export/instance, or not originated from import/instance : do nothing
+  if (!def || def.kind === 'param' || !isFlat(def) || !def.namespaces) {
+    return
+  }
+  // console.log(def.name, [...def.namespaces].reverse().join('::'))
+
+  return [...def.namespaces].reverse().join('::')
 }
 
 class PreFlattener implements IRTransformer {
@@ -333,45 +399,51 @@ class PreFlattener implements IRTransformer {
     return quintModule
   }
 
-  private getNamespaceForDef(def?: Definition): string | undefined {
-    if (def && def.kind === 'def' && def.importedFrom) {
-      const a =
-        def.importedFrom.kind === 'instance'
-          ? compact([
-              this.currentModuleName,
-              def.importedFrom.qualifiedName ? undefined : def.importedFrom.protoName,
-            ]).join('::')
-          : // : def.importedFrom.qualifiedName
-            // ? this.currentModuleName
-            undefined //def.importedFrom.protoName
-      console.log('namespace', a)
-    }
-    // builtin, param, import/export/instance, or not originated from import/instance : do nothing
-    if (!def || def.kind === 'param' || !isFlat(def) || !def.importedFrom) {
-      return
-    }
+  // private getNamespaceForDef(def?: Definition): string | undefined {
+  //   if (def && def.kind === 'def' && def.importedFrom) {
+  //     const a =
+  //       def.importedFrom.kind === 'instance'
+  //         ? compact([
+  //             this.currentModuleName,
+  //             def.importedFrom.qualifiedName ? undefined : def.importedFrom.protoName,
+  //           ]).join('::')
+  //         : // : def.importedFrom.qualifiedName
+  //           // ? this.currentModuleName
+  //           undefined //def.importedFrom.protoName
+  //     console.log('namespace', a)
+  //   }
+  //   // builtin, param, import/export/instance, or not originated from import/instance : do nothing
+  //   if (!def || def.kind === 'param' || !isFlat(def) || !def.importedFrom) {
+  //     return
+  //   }
 
-    return def.importedFrom.kind === 'instance'
-      ? compact([this.currentModuleName, def.importedFrom.qualifiedName ? undefined : def.importedFrom.protoName]).join(
-          '::'
-        )
-      : // : def.importedFrom.qualifiedName
-        // ? this.currentModuleName
-        undefined //def.importedFrom.protoName
-  }
+  //   return def.importedFrom.kind === 'instance'
+  //     ? compact([this.currentModuleName, def.importedFrom.qualifiedName ? undefined : def.importedFrom.protoName]).join(
+  //         '::'
+  //       )
+  //     : // : def.importedFrom.qualifiedName
+  //       // ? this.currentModuleName
+  //       undefined //def.importedFrom.protoName
+  // }
 
   enterName(expr: QuintName): QuintName {
     const def = this.lookupTable.get(expr.id)
-    console.log(expr.name)
-    const namespace = this.getNamespaceForDef(def)
+    if (def?.importedFrom?.kind !== 'instance') {
+      return expr
+    }
+    // console.log(expr.name)
+    const namespace = getNamespaceForDef(def)
 
     return { ...expr, name: compact([namespace, expr.name]).join('::') }
   }
 
   enterApp(expr: QuintApp): QuintApp {
     const def = this.lookupTable.get(expr.id)
-    console.log(expr.opcode)
-    const namespace = this.getNamespaceForDef(def)
+    if (def?.importedFrom?.kind !== 'instance') {
+      return expr
+    }
+    // console.log(expr.opcode)
+    const namespace = getNamespaceForDef(def)
 
     return { ...expr, opcode: compact([namespace, expr.opcode]).join('::') }
   }
@@ -410,12 +482,12 @@ class PreFlattener implements IRTransformer {
       })
     })
 
-    newDefs.push(...flattener.defsToAdd)
+    newDefs.push(...flattener.defsToAdd.values())
 
     newDefs.push(
       ...module.defs.filter(d => d.kind !== 'const').map(d => this.flattener.addNamespaceToDef(newName, d, true))
     )
-    this.newModules.push({ ...module, defs: newDefs, name: newName })
+    this.newModules.push({ ...module, defs: newDefs.map(d => transformDefinition(this, d)), name: newName })
 
     const r: QuintImport = {
       kind: 'import',

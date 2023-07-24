@@ -12,6 +12,7 @@
  * @module
  */
 
+import { compact } from 'lodash'
 import { IRVisitor } from '../IRVisitor'
 import { QuintError } from '../quintError'
 import {
@@ -148,9 +149,23 @@ export class NameCollector implements IRVisitor {
     // add info to know where this def came from
     newDefs.forEach((d, _name) => {
       d.importedFrom ??= def
+
+      const namespace = this.namespace(def)
+      if (namespace) {
+        d.namespaces ??= []
+        d.namespaces.push(namespace)
+      }
     })
 
     this.collectDefinitions(newDefs)
+  }
+
+  private namespace(def: QuintImport | QuintInstance | QuintExport): string | undefined {
+    return def.kind === 'instance'
+      ? compact([this.currentModuleName, def.qualifiedName ? undefined : def.protoName]).join('::')
+      : def.defName
+      ? undefined
+      : def.qualifiedName ?? def.protoName
   }
 
   enterImport(def: QuintImport): void {
@@ -183,7 +198,11 @@ export class NameCollector implements IRVisitor {
       // Imports all definitions
       // add info to know where this def came from
       const withImportFrom = new Map(
-        [...importableDefinitions.entries()].map(([k, d]) => [k, { ...d, importedFrom: def }])
+        [...importableDefinitions.entries()].map(([k, d]) => {
+          const namespace = this.namespace(def)
+          const namespaces = namespace ? d.namespaces?.concat([namespace]) ?? [namespace] : []
+          return [k, { ...d, importedFrom: def, namespaces }]
+        })
       )
       this.collectDefinitions(withImportFrom)
       return
@@ -197,6 +216,12 @@ export class NameCollector implements IRVisitor {
     }
     // add info to know where this def came from
     newDef.importedFrom ??= def
+
+    const namespace = this.namespace(def)
+    if (namespace) {
+      newDef.namespaces ??= []
+      newDef.namespaces.push(namespace)
+    }
 
     this.collectDefinition(def.defName, newDef, def.id)
   }
@@ -225,7 +250,11 @@ export class NameCollector implements IRVisitor {
     if (!def.defName || def.defName === '*') {
       // Export all definitions
       const withImportFrom = new Map(
-        [...exportableDefinitions.entries()].map(([k, d]) => [k, { ...d, importedFrom: def }])
+        [...exportableDefinitions.entries()].map(([k, d]) => {
+          const namespace = this.namespace(def)
+          const namespaces = namespace ? d.namespaces?.concat([namespace]) ?? [namespace] : []
+          return [k, { ...d, importedFrom: def, namespaces }]
+        })
       )
       this.collectDefinitions(withImportFrom)
       return
@@ -242,7 +271,9 @@ export class NameCollector implements IRVisitor {
     // add info to know where this def came from
     // newDef.importedFrom = def
 
-    this.collectDefinition(def.defName, { ...newDef, importedFrom: def }, def.id)
+    const namespace = this.namespace(def)
+    const namespaces = namespace ? newDef.namespaces?.concat([namespace]) ?? [namespace] : []
+    this.collectDefinition(def.defName, { ...newDef, importedFrom: def, namespaces }, def.id)
   }
 
   /** Public interface to manipulate the collected definitions. Used by
