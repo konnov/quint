@@ -62,6 +62,8 @@ function errSimulationResult(status: SimulatorResultStatus, errors: ErrorMessage
  *
  * @param idGen a unique generator of identifiers
  * @param code the source code of the modules
+ * @param mainStart the start index of the main module in the code
+ * @param mainEnd the end index of the main module in the code
  * @param mainName the module that should be used as a state machine
  * @param mainPath the lookup path that was used to retrieve the main module
  * @param options simulator settings
@@ -95,15 +97,8 @@ export function compileAndRun(
   ]
 
   // Construct the modules' code, adding the extra definitions to the main module
-  // Find the module with `mainName` with `}` as the last char (followed by either another module or EOF)
-  // const mainModuleCode = code.match(/module A {(.*)}[[\s*module .+]|\s*]+$/)
-  // console.log(mainModuleCode)
-  console.log(mainStart, mainEnd)
   const newMainModuleCode = code.slice(mainStart, mainEnd - 1) + extraDefs.join('\n')
-  console.log('new', newMainModuleCode)
   const codeWithExtraDefs = code.slice(0, mainStart) + newMainModuleCode + code.slice(mainEnd)
-  // const newMainModuleCode = mainModuleCode![0].replace('}', extraDefs.join('\n') + '\n}')
-  // const codeWithExtraDefs = code.replace(mainModuleCode![0], newMainModuleCode)
 
   const recorder = newTraceRecorder(options.verbosity, options.rng)
   const ctx = compileFromCode(idGen, codeWithExtraDefs, mainName, mainPath, recorder, options.rng.next)
