@@ -19,6 +19,7 @@ import {
   FlatModule,
   QuintApp,
   QuintDef,
+  QuintExport,
   QuintImport,
   QuintInstance,
   QuintModule,
@@ -64,7 +65,7 @@ export function flattenModules(
   // inlined.modules.forEach(m => console.log(moduleToString(m)))
   // console.log('--- END inlined -----')
 
-  const flattener1 = new FlattenerVisitor(inlined.table)
+  const flattener1 = new FlattenerVisitor(new Map(inlined.modules.map(m => [m.name, m])), inlined.table)
   inlined.modules.forEach(m => {
     walkModule(flattener1, m)
     m.defs = m.defs.filter(d => d.kind !== 'import' && d.kind !== 'export')
@@ -80,9 +81,9 @@ export function flattenModules(
   })
   // const renamedModules = renameToCanonical(table, inlined.modules)
 
-  console.log('--- modules to pre flatten -----')
-  renamedModules.forEach(m => console.log(moduleToString(m)))
-  console.log('--- END modules to pre flatten -----')
+  // console.log('--- modules to pre flatten -----')
+  // renamedModules.forEach(m => console.log(moduleToString(m)))
+  // console.log('--- END modules to pre flatten -----')
 
   const preFlattener = new PreFlattener(
     new Map(renamedModules.map(m => [m.name, m])),
@@ -124,7 +125,7 @@ export function flattenModules(
   // const { table: newModulesTable } = result.unwrap()
   // const newTable = new Map([...newModulesTable, ...table])
 
-  const flattener = new FlattenerVisitor(newTable, true)
+  const flattener = new FlattenerVisitor(new Map(preFlattenedModules.map(m => [m.name, m])), newTable, true)
   preFlattenedModules.forEach(m => {
     walkModule(flattener, m)
   })
@@ -184,7 +185,7 @@ export function addDefToFlatModule(
   flattenedAnalysis: AnalysisOutput
 } {
   // modules.forEach(m => console.log(moduleToString(m)))
-  const flattener1 = new FlattenerVisitor(table)
+  const flattener1 = new FlattenerVisitor(new Map(modules.map(m => [m.name, m])), table)
   modules.forEach(m => {
     walkModule(flattener1, m)
     m.defs = m.defs.filter(d => d.kind !== 'import' && d.kind !== 'export')
@@ -233,7 +234,7 @@ export function addDefToFlatModule(
     newTable = result.unwrap().table
   }
 
-  const flattener = new FlattenerVisitor(newTable, true)
+  const flattener = new FlattenerVisitor(new Map(modules.map(m => [m.name, m])), newTable, true)
   walkDefinition(flattener, preFlattenedDef)
   const flattenedDefs = Array.from(flattener.defsToAdd.values())
     .concat(preFlattenedDef)
@@ -264,9 +265,9 @@ export function addDefToFlatModule(
 class FlattenerVisitor implements IRVisitor {
   defsToAdd: Map<string, QuintDef> = new Map()
   private flattener: Flatenner
+  private modulesByName: Map<string, QuintModule>
 
   private lookupTable: LookupTable
-  private currentModuleName?: string
   private namespaceForNested?: string
   private flattenInstances: boolean
 
@@ -274,15 +275,15 @@ class FlattenerVisitor implements IRVisitor {
   //   return name.split('::').slice(0, -1).join('::')
   // }
 
-  constructor(lookupTable: LookupTable, flattenInstances: boolean = false) {
+  constructor(modulesByName: Map<string, QuintModule>, lookupTable: LookupTable, flattenInstances: boolean = false) {
+    this.modulesByName = modulesByName
     this.lookupTable = lookupTable
     this.flattener = new Flatenner()
     this.flattenInstances = flattenInstances
   }
 
-  enterModule(quintModule: QuintModule) {
+  enterModule(_quintModule: QuintModule) {
     this.defsToAdd = new Map()
-    this.currentModuleName = quintModule.name
   }
 
   exitModule(quintModule: QuintModule) {
@@ -345,6 +346,15 @@ class FlattenerVisitor implements IRVisitor {
     this.namespaceForNested = namespace
     walkDefinition(this, newDef)
     this.namespaceForNested = old
+  }
+
+  enterExport(def: QuintExport) {
+    this.modulesByName.get(def.protoName)!.defs.forEach(d => {
+      walkDefinition(this, d)
+      if (isFlat(d)) {
+        this.defsToAdd.set(d.name, d)
+      }
+    })
   }
 
   enterInstance(instance: QuintInstance) {
@@ -466,7 +476,7 @@ class PreFlattener implements IRTransformer {
     const module = this.modulesByName.get(def.protoName)!
     const newDefs = []
     const newName = [this.currentModuleName!, def.qualifiedName ?? module.name].join('::')
-    const flattener = new FlattenerVisitor(this.lookupTable)
+    const flattener = new FlattenerVisitor(this.modulesByName, this.lookupTable)
     def.overrides.forEach(([param, ex]) => {
       walkExpression(flattener, ex)
       if (ex.kind === 'name' && ex.name === param.name) {
