@@ -23,6 +23,7 @@ import {
   QuintInstance,
   QuintLambdaParameter,
   QuintOpDef,
+  isFlat,
 } from '../quintIr'
 import { QuintType, Row } from '../quintTypes'
 
@@ -83,6 +84,19 @@ export function copyNames(
   })
 
   return table
+}
+
+export function addNamespaceToDef(def: Definition, namespaces: string[]): Definition {
+  return namespaces.reduce((def, namespace) => {
+    if (
+      (def.namespaces && def.namespaces[def.namespaces?.length - 1] === namespace) ||
+      ((def.kind === 'param' || isFlat(def)) && def.name.startsWith(namespace))
+    ) {
+      return def
+    }
+    const namespaces = namespace ? def.namespaces?.concat([namespace]) ?? [namespace] : []
+    return { ...def, namespaces }
+  }, def)
 }
 
 /**

@@ -80,9 +80,9 @@ export function flattenModules(
   })
   // const renamedModules = renameToCanonical(table, inlined.modules)
 
-  // console.log('--- modules to pre flatten -----')
-  // renamedModules.forEach(m => console.log(moduleToString(m)))
-  // console.log('--- END modules to pre flatten -----')
+  console.log('--- modules to pre flatten -----')
+  renamedModules.forEach(m => console.log(moduleToString(m)))
+  console.log('--- END modules to pre flatten -----')
 
   const preFlattener = new PreFlattener(
     new Map(renamedModules.map(m => [m.name, m])),
@@ -105,9 +105,9 @@ export function flattenModules(
   })
   const modulesToFlatten = preFlattenedModules
 
-  // console.log('--- modules to flatten -----')
-  // modulesToFlatten.forEach(m => console.log(moduleToString(m)))
-  // console.log('--- END modules to flatten -----')
+  console.log('--- modules to flatten -----')
+  modulesToFlatten.forEach(m => console.log(moduleToString(m)))
+  console.log('--- END modules to flatten -----')
 
   const result = parsePhase3importAndNameResolution({
     modules: modulesToFlatten,
@@ -370,7 +370,7 @@ function getNamespaceForDef(def?: Definition): string | undefined {
   if (!def || def.kind === 'param' || !isFlat(def) || !def.namespaces) {
     return
   }
-  // console.log(def.name, [...def.namespaces].reverse().join('::'))
+  console.log(def.name, [...def.namespaces].reverse().join('::'))
 
   return [...def.namespaces].reverse().join('::')
 }
@@ -428,24 +428,24 @@ class PreFlattener implements IRTransformer {
 
   enterName(expr: QuintName): QuintName {
     const def = this.lookupTable.get(expr.id)
-    if (def?.importedFrom?.kind !== 'instance') {
+    if (def?.importedFrom?.kind !== 'instance' || (def.kind !== 'param' && !isFlat(def))) {
       return expr
     }
-    // console.log(expr.name)
+    console.log(expr.name)
     const namespace = getNamespaceForDef(def)
 
-    return { ...expr, name: compact([namespace, expr.name]).join('::') }
+    return { ...expr, name: compact([namespace, def.name]).join('::') }
   }
 
   enterApp(expr: QuintApp): QuintApp {
     const def = this.lookupTable.get(expr.id)
-    if (def?.importedFrom?.kind !== 'instance') {
+    if (def?.importedFrom?.kind !== 'instance' || (def.kind !== 'param' && !isFlat(def))) {
       return expr
     }
-    // console.log(expr.opcode)
+    console.log(expr.opcode)
     const namespace = getNamespaceForDef(def)
 
-    return { ...expr, opcode: compact([namespace, expr.opcode]).join('::') }
+    return { ...expr, opcode: compact([namespace, def.name]).join('::') }
   }
 
   // enterConstType(type: QuintConstType): QuintConstType {
