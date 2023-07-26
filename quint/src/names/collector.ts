@@ -119,6 +119,12 @@ export class NameCollector implements IRVisitor {
     }
 
     const instanceTable = new Map([...moduleTable.entries()])
+    if (def.qualifiedName) {
+      // Add the qualifier to `definitionsMyModule` map with a copy of the
+      // definitions, so if there is an export of that qualifier, we know which
+      // definitions to export
+      this.definitionsByModule.set(def.qualifiedName, instanceTable)
+    }
 
     // For each override, check if the name exists in the instantiated module and is a constant.
     // If so, update the value definition to point to the expression being overriden
@@ -158,13 +164,6 @@ export class NameCollector implements IRVisitor {
         return [name, addNamespacesToDef(d, namespace)]
       })
     )
-
-    if (def.qualifiedName) {
-      // Add the qualifier to `definitionsMyModule` map with a copy of the
-      // definitions, so if there is an export of that qualifier, we know which
-      // definitions to export
-      this.definitionsByModule.set(def.qualifiedName, defsWithNamespaces)
-    }
 
     this.collectDefinitions(defsWithNamespaces)
   }
