@@ -106,9 +106,9 @@ export function flattenModules(
   })
   const modulesToFlatten = preFlattenedModules
 
-  console.log('--- modules to flatten -----')
-  modulesToFlatten.forEach(m => console.log(moduleToString(m)))
-  console.log('--- END modules to flatten -----')
+  // console.log('--- modules to flatten -----')
+  // modulesToFlatten.forEach(m => console.log(moduleToString(m)))
+  // console.log('--- END modules to flatten -----')
 
   const result = parsePhase3importAndNameResolution({
     modules: modulesToFlatten,
@@ -142,9 +142,9 @@ export function flattenModules(
   // inline aliases later
   if (result2.isLeft()) throw new Error('Flattening failed: ' + result2.value.map(e => e.explanation))
 
-  console.log('--- flattened -----')
-  result2.unwrap().modules.forEach(m => console.log(moduleToString(m)))
-  console.log('--- END flattened -----')
+  // console.log('--- flattened -----')
+  // result2.unwrap().modules.forEach(m => console.log(moduleToString(m)))
+  // console.log('--- END flattened -----')
 
   return {
     flattenedModules: result2.unwrap().modules as FlatModule[],
@@ -349,11 +349,31 @@ class FlattenerVisitor implements IRVisitor {
   }
 
   enterExport(def: QuintExport) {
-    this.modulesByName.get(def.protoName)!.defs.forEach(d => {
-      walkDefinition(this, d)
-      if (isFlat(d)) {
-        this.defsToAdd.set(d.name, d)
+    const ids = this.modulesByName.get(def.protoName)!.defs.map(d => d.id)
+    const definitions: Definition[] = [...this.lookupTable.values()].filter(d => ids.includes(d.id))
+
+    definitions.forEach(d => {
+      if (d.kind === 'param') {
+        // I think this is impossible
+        return
       }
+      if (!isFlat(d)) {
+        walkDefinition(this, d)
+        return
+      }
+      if (this.defsToAdd.has(d.name)) {
+        return
+      }
+
+      const namespace = this.namespaceForNested ?? def.defName ? undefined : def.qualifiedName ?? def.protoName
+      const old = this.namespaceForNested
+      this.namespaceForNested = namespace
+      const newDef: Definition =
+        namespace && !d.name.startsWith(namespace) ? this.flattener.addNamespaceToDef(namespace, d) : d
+      const newDefWithoutMetadata = { ...newDef, importedFrom: undefined, hidden: false }
+      walkDefinition(this, newDefWithoutMetadata)
+      this.defsToAdd.set((newDef as FlatDef).name, newDefWithoutMetadata)
+      this.namespaceForNested = old
     })
   }
 
@@ -377,10 +397,10 @@ class FlattenerVisitor implements IRVisitor {
 
 function getNamespaceForDef(def?: Definition): string | undefined {
   // builtin, param, import/export/instance, or not originated from import/instance : do nothing
-  if (!def || def.kind === 'param' || !isFlat(def) || !def.namespaces) {
+  if (!def || (def.kind !== 'param' && !isFlat(def)) || !def.namespaces) {
     return
   }
-  console.log(def.name, [...def.namespaces].reverse().join('::'))
+  // console.log(def.name, [...def.namespaces].reverse().join('::'))
 
   return [...def.namespaces].reverse().join('::')
 }
@@ -409,41 +429,13 @@ class PreFlattener implements IRTransformer {
     return quintModule
   }
 
-  // private getNamespaceForDef(def?: Definition): string | undefined {
-  //   if (def && def.kind === 'def' && def.importedFrom) {
-  //     const a =
-  //       def.importedFrom.kind === 'instance'
-  //         ? compact([
-  //             this.currentModuleName,
-  //             def.importedFrom.qualifiedName ? undefined : def.importedFrom.protoName,
-  //           ]).join('::')
-  //         : // : def.importedFrom.qualifiedName
-  //           // ? this.currentModuleName
-  //           undefined //def.importedFrom.protoName
-  //     console.log('namespace', a)
-  //   }
-  //   // builtin, param, import/export/instance, or not originated from import/instance : do nothing
-  //   if (!def || def.kind === 'param' || !isFlat(def) || !def.importedFrom) {
-  //     return
-  //   }
-
-  //   return def.importedFrom.kind === 'instance'
-  //     ? compact([this.currentModuleName, def.importedFrom.qualifiedName ? undefined : def.importedFrom.protoName]).join(
-  //         '::'
-  //       )
-  //     : // : def.importedFrom.qualifiedName
-  //       // ? this.currentModuleName
-  //       undefined //def.importedFrom.protoName
-  // }
-
   enterName(expr: QuintName): QuintName {
     const def = this.lookupTable.get(expr.id)
     if (def?.importedFrom?.kind !== 'instance' || (def.kind !== 'param' && !isFlat(def))) {
       return expr
     }
-    console.log(expr.name)
-    const namespace = getNamespaceForDef(def)
 
+    const namespace = getNamespaceForDef(def)
     return { ...expr, name: compact([namespace, def.name]).join('::') }
   }
 
@@ -452,7 +444,7 @@ class PreFlattener implements IRTransformer {
     if (def?.importedFrom?.kind !== 'instance' || (def.kind !== 'param' && !isFlat(def))) {
       return expr
     }
-    console.log(expr.opcode)
+    // console.log(expr.opcode)
     const namespace = getNamespaceForDef(def)
 
     return { ...expr, opcode: compact([namespace, def.name]).join('::') }
