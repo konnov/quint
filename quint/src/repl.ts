@@ -70,7 +70,7 @@ class ReplState {
     this.exprHist = []
     this.lastLoadedFileAndModule = [undefined, undefined]
     this.compilationState = newCompilationState()
-    this.evaluationState = newEvaluationState(newTraceRecorder(verbosityLevel, rng))
+    this.evaluationState = newEvaluationState('__repl__', newTraceRecorder(verbosityLevel, rng))
   }
 
   clone() {
@@ -79,6 +79,7 @@ class ReplState {
     copy.exprHist = this.exprHist
     copy.lastLoadedFileAndModule = this.lastLoadedFileAndModule
     copy.compilationState = this.compilationState
+    copy.evaluationState = this.evaluationState
     return copy
   }
 
@@ -93,7 +94,7 @@ class ReplState {
     this.moduleHist = ''
     this.exprHist = []
     this.compilationState = newCompilationState()
-    this.evaluationState = newEvaluationState(newTraceRecorder(this.verbosity, this.rng))
+    this.evaluationState = newEvaluationState('__repl__', newTraceRecorder(this.verbosity, this.rng))
   }
 
   get recorder(): TraceRecorder {
@@ -266,6 +267,7 @@ export function quintRepl(
     state.exprHist = newState.exprHist
     state.compilationState = newState.compilationState
     state.evaluationState = newState.evaluationState
+    state.evaluationState.mainName = moduleNameToLoad
   }
 
   // the read-eval-print loop

@@ -70,6 +70,8 @@ export interface EvaluationState {
   errorTracker: CompilerErrorTracker
   // The execution listener that the compiled code uses to report execution info.
   listener: ExecutionListener
+  // The module name to evaluate
+  mainName: string
 }
 
 /**
@@ -97,7 +99,7 @@ export class CompilerErrorTracker {
  *
  * @returns a new EvaluationState object with the lastTrace shadow variable register
  */
-export function newEvaluationState(listener: ExecutionListener): EvaluationState {
+export function newEvaluationState(mainName: string, listener: ExecutionListener): EvaluationState {
   const state: EvaluationState = {
     context: builtinContext(),
     vars: [],
@@ -105,6 +107,7 @@ export function newEvaluationState(listener: ExecutionListener): EvaluationState
     shadowVars: [],
     errorTracker: new CompilerErrorTracker(),
     listener: listener,
+    mainName: mainName,
   }
 
   // Initialize compiler state
@@ -155,6 +158,7 @@ export class CompilerVisitor implements IRVisitor {
   private rand
   // execution listener
   private execListener: ExecutionListener
+  private mainName: string
   // the current depth of operator definitions: top-level defs are depth 0
   private definitionDepth: number = 0
 
@@ -174,6 +178,7 @@ export class CompilerVisitor implements IRVisitor {
     this.shadowVars = evaluationState.shadowVars
     this.errorTracker = evaluationState.errorTracker
     this.execListener = evaluationState.listener
+    this.mainName = evaluationState.mainName
   }
 
   /**
@@ -187,6 +192,7 @@ export class CompilerVisitor implements IRVisitor {
       shadowVars: this.shadowVars,
       errorTracker: this.errorTracker,
       listener: this.execListener,
+      mainName: this.mainName,
     }
   }
 

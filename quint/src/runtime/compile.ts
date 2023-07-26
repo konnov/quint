@@ -91,7 +91,7 @@ export function newCompilationState(): CompilationState {
 
 export function errorContextFromMessage(listener: ExecutionListener): (errors: ErrorMessage[]) => CompilationContext {
   const compilationState = newCompilationState()
-  const evaluationState = newEvaluationState(listener)
+  const evaluationState = newEvaluationState('', listener)
   return (errs: ErrorMessage[]) => {
     return {
       lookupTable: new Map(),
@@ -242,6 +242,7 @@ export function compileDef(
       // flatModules.pop()
       // flatModules.push(flattenedModule)
 
+      const defsBefore = state.modules.find(m => m.name === evaluationState.mainName)!.defs
       const {
         flattenedModules: flatModules,
         flattenedTable,
@@ -254,7 +255,10 @@ export function compileDef(
         modules: flatModules,
         originalModules: originalModules,
       }
-      const ctx = compile(newState, evaluationState, flattenedTable, rng.next, flatModules[flatModules.length - 1].defs)
+      const defsAfter = flatModules.find(m => m.name === evaluationState.mainName)!.defs
+      const defsToCompile = defsAfter.filter(d => !defsBefore.some(d2 => d2.id === d.id))
+
+      const ctx = compile(newState, evaluationState, flattenedTable, rng.next, defsToCompile)
 
       const errorLocator = mkErrorMessage(state.sourceMap)
       return {
@@ -320,7 +324,13 @@ export function compileFromCode(
                 },
               ]
           const defsToCompile = main ? main.defs : []
-          const ctx = compile(compilationState, newEvaluationState(execListener), flattenedTable, rand, defsToCompile)
+          const ctx = compile(
+            compilationState,
+            newEvaluationState(mainName, execListener),
+            flattenedTable,
+            rand,
+            defsToCompile
+          )
 
           const errorLocator = mkErrorMessage(sourceMap)
           return right({
