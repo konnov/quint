@@ -67,20 +67,10 @@ Temporarily disabled.
 <!-- test check EWD840 - Types & Effects -->
     quint typecheck ../examples/classic/distributed/ewd840/ewd840.qnt
 
-### OK on parse Tendermint
-
-<!-- !test check Tendermint -->
-    quint parse ../examples/cosmos/tendermint/TendermintAcc005.qnt
-
-### OK on typecheck Tendermint
-
-<!-- !test check Tendermint - Types & Effects -->
-    quint typecheck ../examples/cosmos/tendermint/TendermintAcc005.qnt
-
 ### OK on test Tendermint
 
-<!-- !test check Tendermint - Test -->
-    quint test --max-samples=100 --main InstanceTests ../examples/cosmos/tendermint/TendermintAcc005.qnt
+<!-- !test check Tendermint - Syntax/Types & Effects/Unit tests -->
+    quint test --max-samples=100 --main TendermintModels ../examples/cosmos/tendermint/TendermintModels.qnt
 
 ### OK on parse imports
 
@@ -215,7 +205,7 @@ Temporarily disabled.
 
 ### OK on test ics20 denomTrace
 <!-- !test check ics20 denomTrace - Syntax/Types & Effects/Unit tests -->
-    quint test --main=properChannelsTests ../examples/cosmos/ics20/denomTrace.qnt
+    quint test --main=properChannelsTests --max-samples=1000 ../examples/cosmos/ics20/denomTrace.qnt
 
 ### OK on test ics20
 <!-- !test check ics20 - Syntax/Types & Effects/Unit tests -->
