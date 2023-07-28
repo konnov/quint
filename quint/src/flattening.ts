@@ -349,6 +349,11 @@ class FlattenerVisitor implements IRVisitor {
   }
 
   enterExport(def: QuintExport) {
+    if (!this.modulesByName.has(def.protoName)) {
+      throw new Error(
+        `Export '${definitionToString(def)}' does not have a matching import. This is not supported for now`
+      )
+    }
     const ids = this.modulesByName.get(def.protoName)!.defs.map(d => d.id)
     const definitions: Definition[] = [...this.lookupTable.values()].filter(d => ids.includes(d.id))
 
