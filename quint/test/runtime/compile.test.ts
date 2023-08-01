@@ -1019,7 +1019,13 @@ describe('incremental compilation', () => {
 
     const moduleToCompile = flattenedModules[flattenedModules.length - 1]
 
-    return compile(state, newEvaluationState(noExecutionListener), flattenedTable, dummyRng.next, moduleToCompile.defs)
+    return compile(
+      state,
+      newEvaluationState(moduleToCompile.name, noExecutionListener),
+      flattenedTable,
+      dummyRng.next,
+      moduleToCompile.defs
+    )
   }
 
   describe('compileExpr', () => {

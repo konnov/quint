@@ -1,305 +1,193 @@
 import { assert } from 'chai'
 import { describe, it } from 'mocha'
-import { addDefToFlatModule, flattenModules } from '../src/flattening'
+import { flattenModules } from '../src/flattening'
 import { newIdGenerator } from '../src/idGenerator'
-import { definitionToString } from '../src/IRprinting'
-import { collectIds } from './util'
-import { parse } from '../src/parsing/quintParserFrontend'
-import { FlatModule, analyzeModules } from '../src'
+import { parse, parsePhase3importAndNameResolution, parsePhase4toposort } from '../src/parsing/quintParserFrontend'
 import { SourceLookupPath } from '../src/parsing/sourceResolver'
+import { analyzeModules } from '../src/quintAnalyzer'
 
 describe('flattenModules', () => {
-  function assertFlatennedDefs(baseDefs: string[], defs: string[], expectedDefs: string[]): void {
+  function assertFlattenedModule(text: string) {
     const idGenerator = newIdGenerator()
     const fake_path: SourceLookupPath = { normalizedPath: 'fake_path', toSourceName: () => 'fake_path' }
+    parse(idGenerator, 'test_location', fake_path, text)
+      .map(({ modules, table, sourceMap }) => {
+        const [moduleA, _module] = modules
 
-    const quintModules: string = `module A { ${baseDefs.join('\n')} } module wrapper { ${defs.join('\n')} }`
+        const [analysisErrors, analysisOutput] = analyzeModules(table, modules)
 
-    const parseResult = parse(idGenerator, 'fake_location', fake_path, quintModules)
-    if (parseResult.isLeft()) {
-      assert.fail('Failed to parse mocked up module')
-    }
-    const { modules, table, sourceMap } = parseResult.unwrap()
-    const [moduleA, _module] = modules
+        const { flattenedModules, flattenedTable } = flattenModules(
+          modules,
+          table,
+          idGenerator,
+          sourceMap,
+          analysisOutput
+        )
 
-    const [analysisErrors, analysisOutput] = analyzeModules(table, modules)
-    assert.isEmpty(analysisErrors)
+        it('has proper names in flattened modules', () => {
+          const result = parsePhase3importAndNameResolution({ modules: flattenedModules, sourceMap })
+          assert.isTrue(result.isRight())
+          result.map(({ table }) =>
+            assert.sameDeepMembers(
+              [...flattenedTable.entries()].map(([id, def]) => [id, def.id]),
+              [...table.entries()].map(([id, def]) => [id, def.id])
+            )
+          )
 
-    const { flattenedModules, flattenedAnalysis } = flattenModules(
-      modules,
-      table,
-      idGenerator,
-      sourceMap,
-      analysisOutput
-    )
-    const [_, flattenedModule] = flattenedModules
+          result.chain(parsePhase4toposort).map(({ modules }) => {
+            assert.deepEqual(modules, flattenedModules)
+          })
+        })
 
-    it('has all expected defs', () => {
-      assert.sameDeepMembers(
-        flattenedModule.defs.map(def => definitionToString(def)),
-        expectedDefs
-      )
-    })
+        it('has proper analysis output in flattened modules', () => {
+          assert.isEmpty(analysisErrors)
+        })
+      })
+      .mapLeft(err => {
+        it('has no erros', () => {
+          assert.fail(`Expected no error, but got ${err.map(e => e.explanation)}`)
+        })
+      })
 
-    it('does not repeat ids', () => {
-      const ids = collectIds(flattenedModule)
-      assert.notDeepInclude(collectIds(moduleA), ids)
-      assert.sameDeepMembers(ids, [...new Set(ids)])
-    })
-
-    it('adds new entries to the source map', () => {
-      assert.includeDeepMembers(
-        [...sourceMap.keys()],
-        flattenedModule.defs.map(def => def.id)
-      )
-    })
-
-    it('adds new entries to the types map', () => {
-      assert.includeDeepMembers(
-        [...flattenedAnalysis.types.keys()],
-        flattenedModule.defs.filter(def => def.kind !== 'typedef').map(def => def.id)
-      )
-    })
-
-    it('has no aliases in the types map', () => {
-      assert.notIncludeMembers(
-        [...flattenedAnalysis.types.values()].map(t => t.type.kind),
-        ['const']
-      )
-    })
+    // it('has no imports, exports or instance statements', () => {
+    //   flattenedModules.forEach(m => {
+    //     m.defs.forEach(d => {
+    //       assert.isFalse(
+    //         d.kind === 'import' || d.kind === 'export' || d.kind === 'instance',
+    //         `Found ${d.kind} in flattened module: ${definitionToString(d)}`
+    //       )
+    //     })
+    //   })
+    // })
   }
 
-  describe('multiple instances', () => {
-    const baseDefs = ['const N: int', 'val x = N + 1']
-
-    const defs = ['import A(N = 1) as A1', 'import A(N = 2) as A2']
-
-    const expectedDefs = [
-      'pure val A1::N: int = 1',
-      'val A1::x = iadd(A1::N, 1)',
-      'pure val A2::N: int = 2',
-      'val A2::x = iadd(A2::N, 1)',
-    ]
-
-    assertFlatennedDefs(baseDefs, defs, expectedDefs)
-  })
-
-  describe('single instance with several definitions', () => {
-    const baseDefs = [
-      'const N: int',
-      'var x: int',
-      'pure def f(a) = a + 1',
-      `action V = x' = f(x)`,
-      'assume T = N > 0',
-      'def lam = val b = 1 { a => b + a }',
-      'def lam2 = val b = 1 { a => b + a }',
-    ]
-
-    const defs = ['import A(N = 1) as A1']
-
-    const expectedDefs = [
-      'pure val A1::N: int = 1',
-      'var A1::x: int',
-      'pure def A1::f = ((A1::a) => iadd(A1::a, 1))',
-      `action A1::V = assign(A1::x, A1::f(A1::x))`,
-      'assume A1::T = igt(A1::N, 0)',
-      'def A1::lam = val A1::b = 1 { ((A1::a) => iadd(A1::b, A1::a)) }',
-      'def A1::lam2 = val A1::b = 1 { ((A1::a) => iadd(A1::b, A1::a)) }',
-    ]
-
-    assertFlatennedDefs(baseDefs, defs, expectedDefs)
-  })
-
-  describe('imports', () => {
-    const baseDefs = ['val f(x) = x + 1']
-
-    const defs = ['import A.*']
-
-    const expectedDefs = ['val f = ((x) => iadd(x, 1))']
-
-    assertFlatennedDefs(baseDefs, defs, expectedDefs)
-  })
-
-  describe('export with previous import', () => {
-    const baseDefs = ['val f(x) = x + 1']
-
-    const defs = ['import A.*', 'export A.*']
-
-    const expectedDefs = ['val f = ((x) => iadd(x, 1))']
-
-    assertFlatennedDefs(baseDefs, defs, expectedDefs)
-  })
-
-  describe('export without previous import', () => {
-    const baseDefs = ['val f(x) = x + 1']
-
-    const defs = ['export A.*']
-
-    const expectedDefs = ['val f = ((x) => iadd(x, 1))']
-
-    assertFlatennedDefs(baseDefs, defs, expectedDefs)
-  })
-
-  describe('export instance', () => {
-    const baseDefs = ['const N: int', 'val x = N + 1']
-
-    const defs = ['import A(N = 1) as A1', 'export A1.*']
-
-    const expectedDefs = [
-      // Namespaced defs, from the instance statement
-      'pure val A1::N: int = 1',
-      'val A1::x = iadd(A1::N, 1)',
-      // Exported defs, without namespace
-      'pure val N: int = 1',
-      'val x = iadd(N, 1)',
-    ]
-
-    assertFlatennedDefs(baseDefs, defs, expectedDefs)
-  })
-
-  describe('export instance with qualifier', () => {
-    const baseDefs = ['const N: int', 'val x = N + 1']
-
-    const defs = ['val myN = 1', 'import A(N = myN) as A1', 'export A1 as B']
-
-    const expectedDefs = [
-      'val myN = 1',
-      // Namespaced defs, from the instance statement
-      'pure val A1::N: int = myN',
-      'val A1::x = iadd(A1::N, 1)',
-      // Exported defs, with namespace B
-      'pure val B::N: int = myN',
-      'val B::x = iadd(B::N, 1)',
-    ]
-
-    assertFlatennedDefs(baseDefs, defs, expectedDefs)
-  })
-
-  describe('inlines aliases', () => {
-    const baseDefs = ['type MY_ALIAS = int', 'const N: MY_ALIAS']
-
-    const defs = ['import A(N = 1) as A1', 'var t: A1::MY_ALIAS']
-
-    const expectedDefs = ['type A1::MY_ALIAS = int', 'pure val A1::N: int = 1', 'var t: int']
-
-    assertFlatennedDefs(baseDefs, defs, expectedDefs)
-  })
-})
-
-describe('addDefToFlatModule', () => {
-  function assertAddedDefs(
-    baseDefs: string[],
-    currentModuleDefs: string[],
-    defToAdd: string,
-    expectedDefs: string[]
-  ): void {
-    const idGenerator = newIdGenerator()
-    const fake_path: SourceLookupPath = { normalizedPath: 'fake_path', toSourceName: () => 'fake_path' }
-
-    const quintModules: string = `module A { ${baseDefs.join('\n')} } module wrapper { ${currentModuleDefs
-      .concat(defToAdd)
-      .join('\n')} }`
-
-    const parseResult = parse(idGenerator, 'fake_location', fake_path, quintModules)
-    if (parseResult.isLeft()) {
-      assert.fail('Failed to parse mocked up module')
+  describe('flattenning simple imports', () => {
+    const text = `module A {
+      val a = 1
     }
-    const { modules, table, sourceMap } = parseResult.unwrap()
-    const [moduleA, module] = modules
 
-    const [analysisErrors, analysisOutput] = analyzeModules(table, modules)
-    assert.isEmpty(analysisErrors)
+    module B {
+      import A.*
+      val b = a + 1
+    }`
 
-    const def = module.defs[module.defs.length - 1]
-    const moduleWithoutDef: FlatModule = { ...module, defs: [] }
-    const { flattenedModule, flattenedAnalysis } = addDefToFlatModule(
-      modules,
-      table,
-      idGenerator,
-      sourceMap,
-      analysisOutput,
-      moduleWithoutDef,
-      def
-    )
-
-    it('has all expected defs', () => {
-      assert.sameDeepMembers(
-        flattenedModule.defs.map(def => definitionToString(def)),
-        expectedDefs
-      )
-    })
-
-    it('does not repeat ids', () => {
-      const ids = collectIds(flattenedModule)
-      assert.notDeepInclude(collectIds(moduleA), ids)
-      assert.sameDeepMembers(ids, [...new Set(ids)])
-    })
-
-    it('adds new entries to the source map', () => {
-      assert.includeDeepMembers(
-        [...sourceMap.keys()],
-        flattenedModule.defs.map(def => def.id)
-      )
-    })
-
-    it('adds new entries to the types map', () => {
-      assert.includeDeepMembers(
-        [...flattenedAnalysis.types.keys()],
-        flattenedModule.defs.filter(def => def.kind !== 'typedef').map(def => def.id)
-      )
-    })
-
-    it('has no aliases in the types map', () => {
-      assert.notIncludeMembers(
-        [...flattenedAnalysis.types.values()].map(t => t.type.kind),
-        ['const']
-      )
-    })
-  }
-
-  describe('single instance with several definitions', () => {
-    const baseDefs = [
-      'const N: int',
-      'var x: int',
-      'pure def f(a) = a + 1',
-      `action V = x' = f(x)`,
-      'assume T = N > 0',
-      'def lam = val b = 1 { a => b + a }',
-      'def lam2 = val b = 1 { a => b + a }',
-    ]
-
-    const defToAdd = 'import A(N = 1) as A1'
-
-    const expectedDefs = [
-      'pure val A1::N: int = 1',
-      'var A1::x: int',
-      'pure def A1::f = ((A1::a) => iadd(A1::a, 1))',
-      `action A1::V = assign(A1::x, A1::f(A1::x))`,
-      'assume A1::T = igt(A1::N, 0)',
-      'def A1::lam = val A1::b = 1 { ((A1::a) => iadd(A1::b, A1::a)) }',
-      'def A1::lam2 = val A1::b = 1 { ((A1::a) => iadd(A1::b, A1::a)) }',
-    ]
-
-    assertAddedDefs(baseDefs, [], defToAdd, expectedDefs)
+    assertFlattenedModule(text)
   })
 
-  describe('imports', () => {
-    const baseDefs = ['val f(x) = x + 1']
+  describe('flattenning simple instances', () => {
+    const text = `module A {
+      const N: int
+      val a = N
+    }
 
-    const defToAdd = 'import A.*'
+    module B {
+      import A(N=1).*
+      val b = a + 1
+    }`
 
-    const expectedDefs = ['val f = ((x) => iadd(x, 1))']
-
-    assertAddedDefs(baseDefs, [], defToAdd, expectedDefs)
+    assertFlattenedModule(text)
   })
 
-  describe('type aliases', () => {
-    const currentModuleDefs = ['type MY_ALIAS = int']
+  describe('flattenning simple exports', () => {
+    const text = `module A {
+      val a = 1
+    }
 
-    const defToAdd = 'var N: MY_ALIAS'
+    module B {
+      export A.*
+    }
 
-    const expectedDefs = ['var N: int']
+    module C {
+      import B.*
+      val c = a + 1
+    }`
 
-    assertAddedDefs([], currentModuleDefs, defToAdd, expectedDefs)
+    assertFlattenedModule(text)
+  })
+
+  describe('flattenning multiple instances', () => {
+    const text = `module A {
+      const N: int
+      val a = N
+    }
+
+    module B {
+      import A(N=1).*
+      val b = a + 1
+    }
+
+    module C {
+      import A(N=2).*
+      val c = a + 1
+    }
+
+    module D {
+      import B
+      import C
+      val d = B::b + C::c
+    }`
+
+    assertFlattenedModule(text)
+  })
+
+  describe('flattenning exports of abstract modules (to be instantiated in another module)', () => {
+    const text = `module A {
+      const N: int
+      val a = N
+    }
+
+    module B {
+      import A.*
+      export A.*
+      val b = a + 1
+    }
+
+    module C {
+      import B(N=1).*
+      val c = a + 1
+    }`
+
+    assertFlattenedModule(text)
+  })
+
+  describe('flattenning exported instance', () => {
+    const text = `module A {
+      const N: int
+      val a = N
+    }
+
+    module B {
+      import A(N=1) as A1
+      val b = A1::a + 1
+      export A1
+    }
+
+    module C {
+      import B.*
+      val c = A1::a + b
+    }`
+
+    assertFlattenedModule(text)
+  })
+
+  describe('flattenning with names that should not conflict', () => {
+    const text = `module A {
+      val a = 1
+      def f(x) = x
+    }
+
+    module B {
+      var x: int
+      import A.*
+      val b = a + x
+    }
+
+    module C {
+      import A.*
+      import B
+      def g(x) = x + B::x
+    }`
+
+    assertFlattenedModule(text)
   })
 })

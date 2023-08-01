@@ -28,10 +28,8 @@ import {
 } from './quintIr'
 import { Loc, parsePhase3importAndNameResolution, parsePhase4toposort } from './parsing/quintParserFrontend'
 import { AnalysisOutput } from './quintAnalyzer'
-import { inlineAliasesInDef, inlineAnalysisOutput, inlineTypeAliases } from './types/aliasInliner'
+import { inlineTypeAliases } from './types/aliasInliner'
 import { IRVisitor, walkDefinition, walkExpression, walkModule } from './IRVisitor'
-import { CallGraphVisitor, mkCallGraphContext } from './static/callgraph'
-import { toposort } from './static/toposort'
 import { IRTransformer, transformDefinition, transformModule } from './IRTransformer'
 import { compact } from 'lodash'
 import { definitionToString, moduleToString } from './IRprinting'
@@ -65,35 +63,27 @@ export function flattenModules(
   // inlined.modules.forEach(m => console.log(moduleToString(m)))
   // console.log('--- END inlined -----')
 
-  const flattener1 = new FlattenerVisitor(new Map(inlined.modules.map(m => [m.name, m])), inlined.table)
-  inlined.modules.forEach(m => {
-    walkModule(flattener1, m)
-    m.defs = m.defs.filter(d => d.kind !== 'import' && d.kind !== 'export')
-  })
+  const modulesByName = new Map(inlined.modules.map(m => [m.name, m]))
+  let flattenedModules: QuintModule[] = []
+  let flattenedTable = inlined.table
+  const modulesQueue = inlined.modules
 
-  // remove duplicates, probably don't need toposorting here
-  // const renamedModules = parsePhase4toposort({ modules: inlined.modules, table: inlined.table, sourceMap }).unwrap()
-  // .modules
-  const renamedModules = inlined.modules.map(module => {
-    // remove duplicates
+  while (modulesQueue.length > 0) {
+    const module = modulesQueue.shift()!
+    const flattener1 = new FlattenerVisitor(modulesByName, flattenedTable)
+    walkModule(flattener1, module)
+    module.defs = module.defs.filter(d => d.kind !== 'import' && d.kind !== 'export')
+
+    // ensure uniqueness
     const defs = new Map<string, QuintDef>(module.defs.filter(isFlat).map(d => [d.name, d]))
-    return { ...module, defs: Array.from(defs.values()).concat(module.defs.filter(d => !isFlat(d))) }
-  })
-  // const renamedModules = renameToCanonical(table, inlined.modules)
+    module.defs = Array.from(defs.values()).concat(module.defs.filter(d => !isFlat(d)))
 
-  // console.log('--- modules to pre flatten -----')
-  // renamedModules.forEach(m => console.log(moduleToString(m)))
-  // console.log('--- END modules to pre flatten -----')
+    // console.log('--- modules to pre flatten -----')
+    // console.log(moduleToString(module))
+    // console.log('--- END modules to pre flatten -----')
 
-  const preFlattener = new PreFlattener(
-    new Map(renamedModules.map(m => [m.name, m])),
-    idGenerator,
-    inlined.table,
-    sourceMap,
-    inlined.analysisOutput
-  )
-  const preFlattenedModules: QuintModule[] = []
-  renamedModules.forEach(module => {
+    const preFlattener = new PreFlattener(modulesByName, idGenerator, inlined.table, sourceMap, inlined.analysisOutput)
+    const preFlattenedModules: QuintModule[] = []
     const newModule = transformModule(preFlattener, module)
     preFlattener.newModules.forEach(mod => {
       if (!preFlattenedModules.some(m => m.name === mod.name)) {
@@ -103,162 +93,82 @@ export function flattenModules(
 
     preFlattener.newModules = []
     preFlattenedModules.push(newModule)
-  })
-  const modulesToFlatten = preFlattenedModules
+    const modulesToFlatten = preFlattenedModules
+    // ensure uniqueness
+    modulesToFlatten.forEach(module => {
+      const defs = new Map<string, QuintDef>(module.defs.filter(isFlat).map(d => [d.name, d]))
+      module.defs = Array.from(defs.values()).concat(module.defs.filter(d => !isFlat(d)))
+    })
 
-  // console.log('--- modules to flatten -----')
-  // modulesToFlatten.forEach(m => console.log(moduleToString(m)))
-  // console.log('--- END modules to flatten -----')
+    // console.log('--- modules to flatten -----')
+    // flattenedModules.concat(modulesToFlatten).forEach(m => console.log(moduleToString(m)))
+    // console.log('--- END modules to flatten -----')
 
-  const result = parsePhase3importAndNameResolution({
-    modules: modulesToFlatten,
-    sourceMap,
-  })
-
-  // inline aliases here
-
-  if (result.isLeft()) {
-    throw new Error('Flattening failed: ' + result.value.map(e => e.explanation))
-  }
-
-  const { table: newTable } = result.unwrap()
-  // const { table: newModulesTable } = result.unwrap()
-  // const newTable = new Map([...newModulesTable, ...table])
-
-  const flattener = new FlattenerVisitor(new Map(preFlattenedModules.map(m => [m.name, m])), newTable, true)
-  preFlattenedModules.forEach(m => {
-    walkModule(flattener, m)
-  })
-
-  // Rename to canonical names
-  // const renamedModules = renameToCanonical(newTable, resolvedModules)
-  // const renamedModules = preFlattenedModules
-
-  // console.log('--- renamed modules -----')
-  // renamedModules.forEach(m => console.log(moduleToString(m)))
-  // console.log('--- END renamed modules -----')
-
-  const result2 = parsePhase4toposort({ modules: preFlattenedModules, table: newTable, sourceMap })
-  // inline aliases later
-  if (result2.isLeft()) throw new Error('Flattening failed: ' + result2.value.map(e => e.explanation))
-
-  // console.log('--- flattened -----')
-  // result2.unwrap().modules.forEach(m => console.log(moduleToString(m)))
-  // console.log('--- END flattened -----')
-
-  return {
-    flattenedModules: result2.unwrap().modules as FlatModule[],
-    flattenedTable: result2.unwrap().table,
-    flattenedAnalysis: inlined.analysisOutput,
-  }
-}
-
-/**
- * Adds a definition to a flat module, flattening any instances, imports and
- * exports in the process. Note that the provided parameters should include
- * information for the new definition already, i.e. the lookup table should
- * already contain all the references for names in the definition.
- *
- * @param modules The modules possibly reffered by the definition
- * @param table The lookup table to for all referred names
- * @param idGenerator The id generator to use for new definitions
- * @param sourceMap The source map for all modules involved
- * @param analysisOutput The analysis output for all modules involved
- * @param module The flat module to add the definition to
- * @param def The definition to add
- *
- * @returns An object containing the flattened module, flattened lookup table
- * and flattened analysis output
- */
-export function addDefToFlatModule(
-  modules: QuintModule[],
-  table: LookupTable,
-  idGenerator: IdGenerator,
-  sourceMap: Map<bigint, Loc>,
-  analysisOutput: AnalysisOutput,
-  module: FlatModule,
-  def: QuintDef
-): {
-  flattenedModule: FlatModule
-  flattenedDefs: FlatDef[]
-  flattenedTable: LookupTable
-  flattenedAnalysis: AnalysisOutput
-} {
-  // modules.forEach(m => console.log(moduleToString(m)))
-  const flattener1 = new FlattenerVisitor(new Map(modules.map(m => [m.name, m])), table)
-  modules.forEach(m => {
-    walkModule(flattener1, m)
-    m.defs = m.defs.filter(d => d.kind !== 'import' && d.kind !== 'export')
-    const defs = new Map<string, QuintDef>(m.defs.filter(isFlat).map(d => [d.name, d]))
-    m.defs = Array.from(defs.values()).concat(m.defs.filter(d => !isFlat(d)))
-  })
-  const preFlattener = new PreFlattener(
-    new Map(modules.map(m => [m.name, m])),
-    idGenerator,
-    table,
-    sourceMap,
-    analysisOutput
-  )
-  const preFlattenedModules: QuintModule[] = modules
-  preFlattener.currentModuleName = module.name
-  const preFlattenedDef = transformDefinition(preFlattener, def)
-  preFlattener.newModules.forEach(mod => {
-    if (!preFlattenedModules.some(m => m.name === mod.name)) {
-      preFlattenedModules.push(mod)
-    }
-  })
-
-  preFlattener.newModules = []
-  const modulesToFlatten = preFlattenedModules
-
-  modulesToFlatten.pop()
-  modulesToFlatten.push({ ...module, defs: [...module.defs, preFlattenedDef] })
-  // console.log('--- [INC] modules to flatten -----')
-  // modulesToFlatten.forEach(m => console.log(moduleToString(m)))
-  // console.log('--- [INC] END modules to flatten -----')
-  let newTable: LookupTable
-  if (isFlat(preFlattenedDef)) {
-    newTable = table
-  } else {
     const result = parsePhase3importAndNameResolution({
-      modules: modulesToFlatten,
+      modules: flattenedModules.concat(modulesToFlatten),
       sourceMap,
     })
 
+    // inline aliases here
+
     if (result.isLeft()) {
-      throw new Error('Flattening failed: ' + result.value.map(e => e.explanation))
+      flattenedModules.concat(modulesToFlatten).forEach(m => console.log(moduleToString(m)))
+      throw new Error('[1] Flattening failed: ' + result.value.map(e => e.explanation))
     }
 
-    // inline aliases later
+    const { table: newTable } = result.unwrap()
+    flattenedTable = newTable
+    // const { table: newModulesTable } = result.unwrap()
+    // const newTable = new Map([...newModulesTable, ...table])
 
-    newTable = result.unwrap().table
+    const flattener = new FlattenerVisitor(modulesByName, newTable, true)
+    preFlattenedModules.forEach(m => {
+      walkModule(flattener, m)
+      modulesByName.set(m.name, m)
+    })
+
+    // Rename to canonical names
+    // const renamedModules = renameToCanonical(newTable, resolvedModules)
+    // const renamedModules = preFlattenedModules
+
+    // console.log('--- renamed modules -----')
+    // renamedModules.forEach(m => console.log(moduleToString(m)))
+    // console.log('--- END renamed modules -----')
+
+    // const result2 = parsePhase4toposort({ modules: preFlattenedModules, table: newTable, sourceMap })
+    // // inline aliases later
+    // if (result2.isLeft()) throw new Error('Flattening failed: ' + result2.value.map(e => e.explanation))
+
+    // console.log('--- flattened -----')
+    // preFlattenedModules.forEach(m => console.log(moduleToString(m)))
+    // console.log('--- END flattened -----')
+
+    flattenedModules.push(...preFlattenedModules)
+    const toResolve = flattenedModules.concat(modulesQueue)
+    // console.log('--- resolving -----')
+    // toResolve.forEach(m => console.log(moduleToString(m)))
+    // console.log('--- END resolving -----')
+    const result3 = parsePhase3importAndNameResolution({
+      modules: toResolve,
+      sourceMap,
+    }).chain(parsePhase4toposort)
+
+    if (result3.isLeft()) {
+      toResolve.forEach(m => console.log(moduleToString(m)))
+      throw new Error('[2] Flattening failed: ' + result3.value.map(e => e.explanation))
+    }
+
+    // console.log('--- ALL flattened -----')
+    // flattenedModules.forEach(m => console.log(moduleToString(m)))
+    // console.log('--- END ALL flattened -----')
+    flattenedModules = result3.unwrap().modules.slice(0, flattenedModules.length)
+    flattenedTable = result3.unwrap().table
   }
 
-  const flattener = new FlattenerVisitor(new Map(modules.map(m => [m.name, m])), newTable, true)
-  walkDefinition(flattener, preFlattenedDef)
-  const flattenedDefs = Array.from(flattener.defsToAdd.values())
-    .concat(preFlattenedDef)
-    .map(d => inlineAliasesInDef(d, table) as FlatDef)
-
-  const flattenedModule = { ...module, defs: [...module.defs, ...flattenedDefs] }
-
-  // const result2 = parsePhase4toposort(result.unwrap())
-  // if (result2.isLeft()) throw new Error('Flattening failed: ' + result2.value.map(e => e.explanation))
-
-  // result2.unwrap().modules.forEach(m => console.log(moduleToString(m)))
-
-  const context = mkCallGraphContext([flattenedModule])
-  const visitor = new CallGraphVisitor(table, context)
-  walkModule(visitor, flattenedModule)
-  const sortedDefs = toposort(visitor.graph, flattenedDefs)
-  console.log(sortedDefs.unwrap().map(d => definitionToString(d)))
-  console.log(moduleToString({ ...module, defs: [...module.defs, ...sortedDefs.unwrap()] }))
-
   return {
-    flattenedModule: { ...module, defs: [...module.defs, ...sortedDefs.unwrap()] } as FlatModule,
-    flattenedDefs: sortedDefs.unwrap(),
-    flattenedTable: newTable,
-    flattenedAnalysis: inlineAnalysisOutput(analysisOutput, newTable),
+    flattenedModules: flattenedModules as FlatModule[],
+    flattenedTable,
+    flattenedAnalysis: inlined.analysisOutput,
   }
 }
 
@@ -350,6 +260,7 @@ class FlattenerVisitor implements IRVisitor {
 
   enterExport(def: QuintExport) {
     if (!this.modulesByName.has(def.protoName)) {
+      // FIXME: this error is not reached anymore, find a proper way to report it
       throw new Error(
         `Export '${definitionToString(def)}' does not have a matching import. This is not supported for now`
       )
@@ -375,7 +286,8 @@ class FlattenerVisitor implements IRVisitor {
       this.namespaceForNested = namespace
       const newDef: Definition =
         namespace && !d.name.startsWith(namespace) ? this.flattener.addNamespaceToDef(namespace, d) : d
-      const newDefWithoutMetadata = { ...newDef, importedFrom: undefined, hidden: false }
+      const newDefWithoutMetadata = { ...newDef, importedFrom: undefined, hidden: false, namespaces: [] }
+      // console.log(newDefWithoutMetadata)
       walkDefinition(this, newDefWithoutMetadata)
       this.defsToAdd.set((newDef as FlatDef).name, newDefWithoutMetadata)
       this.namespaceForNested = old
@@ -383,6 +295,10 @@ class FlattenerVisitor implements IRVisitor {
   }
 
   enterInstance(instance: QuintInstance) {
+    if (instance.qualifiedName) {
+      this.modulesByName.set(instance.qualifiedName, this.modulesByName.get(instance.protoName)!)
+    }
+
     if (!this.flattenInstances) {
       return
     }
@@ -397,6 +313,12 @@ class FlattenerVisitor implements IRVisitor {
       }
       this.defsToAdd.set(def.name, def)
     })
+  }
+
+  enterImport(def: QuintImport) {
+    if (def.qualifiedName) {
+      this.modulesByName.set(def.qualifiedName, this.modulesByName.get(def.protoName)!)
+    }
   }
 }
 
@@ -454,16 +376,6 @@ class PreFlattener implements IRTransformer {
 
     return { ...expr, opcode: compact([namespace, def.name]).join('::') }
   }
-
-  // enterConstType(type: QuintConstType): QuintConstType {
-  //   if (!type.id) {
-  //     return type
-  //   }
-  //   const def = this.lookupTable.get(type.id)!
-  //   const namespace = this.getNamespaceForDef(def)
-
-  //   return { ...type, name: compact([namespace, type.name]).join('::') }
-  // }
 
   enterDef(def: QuintDef): QuintDef {
     if (def.kind !== 'instance') {
