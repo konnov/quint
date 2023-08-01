@@ -190,4 +190,23 @@ describe('flattenModules', () => {
 
     assertFlattenedModule(text)
   })
+
+  describe('flattenning import of single name', () => {
+    const text = `module A {
+      val a1 = 1
+      val a = a1
+    }
+
+    module B {
+      import A.a
+      val b = a + 1
+    }
+
+    module C {
+      import B.*
+      val c = b + 1
+    }`
+
+    assertFlattenedModule(text)
+  })
 })
