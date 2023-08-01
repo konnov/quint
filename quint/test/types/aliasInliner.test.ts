@@ -4,7 +4,7 @@ import { SourceLookupPath } from '../../src/parsing/sourceResolver'
 import { parse } from '../../src/parsing/quintParserFrontend'
 import { dedent } from '../textUtils'
 import { inlineTypeAliases } from '../../src/types/aliasInliner'
-import { QuintModule } from '../../src/quintIr'
+import { QuintModule, QuintVar } from '../../src/quintIr'
 import { LookupTable } from '../../src/names/base'
 import { moduleToString } from '../../src/IRprinting'
 import { AnalysisOutput, analyzeModules } from '../../src/quintAnalyzer'
@@ -41,7 +41,7 @@ describe('inlineAliases', () => {
                                   |}`)
 
     assert.deepEqual(moduleToString(modules[0]), expectedModule)
-    assert.deepEqual(table.get(5n)?.typeAnnotation?.kind, 'int')
+    assert.deepEqual((table.get(5n) as QuintVar)?.typeAnnotation?.kind, 'int')
     assert.deepEqual(analysisOutput.types.get(4n)?.type.kind, 'int')
   })
 

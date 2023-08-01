@@ -16,14 +16,9 @@ import { Either, left, right } from '@sweet-monads/either'
 import { IRVisitor, walkModule } from '../IRVisitor'
 import { QuintApp, QuintInstance, QuintLambda, QuintLet, QuintModule, QuintName, QuintOpDef } from '../quintIr'
 import { QuintConstType } from '../quintTypes'
-import { DefinitionsByModule, LookupTable, builtinNames } from './base'
+import { LookupTable, builtinNames } from './base'
 import { QuintError } from '../quintError'
 import { NameCollector } from './collector'
-
-export interface NameResolutionResult {
-  table: LookupTable
-  definitionsByModule: DefinitionsByModule
-}
 
 /**
  * Resolves all names in the given Quint modules and returns a lookup table of definitions.
@@ -31,14 +26,12 @@ export interface NameResolutionResult {
  * @param quintModules - The Quint modules to resolve names in.
  * @returns A lookup table of definitions if successful, otherwise a list of errors.
  */
-export function resolveNames(quintModules: QuintModule[]): Either<QuintError[], NameResolutionResult> {
+export function resolveNames(quintModules: QuintModule[]): Either<QuintError[], LookupTable> {
   const visitor = new NameResolver()
   quintModules.forEach(module => {
     walkModule(visitor, module)
   })
-  return visitor.errors.length > 0
-    ? left(visitor.errors)
-    : right({ table: visitor.table, definitionsByModule: visitor.collector.definitionsByModule })
+  return visitor.errors.length > 0 ? left(visitor.errors) : right(visitor.table)
 }
 
 /**

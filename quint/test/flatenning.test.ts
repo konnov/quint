@@ -209,4 +209,23 @@ describe('flattenModules', () => {
 
     assertFlattenedModule(text)
   })
+
+  describe('flattenning instances with the same name in different modules', () => {
+    const text = `module A {
+      const N: int
+      val a = N
+    }
+
+    module B {
+      import A(N=1) as A1
+      val b = A1::a + 1
+    }
+
+    module C {
+      import A(N=1) as A1
+      val c = A1::a + 1
+    }`
+
+    assertFlattenedModule(text)
+  })
 })

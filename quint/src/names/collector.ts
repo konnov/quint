@@ -169,12 +169,11 @@ export class NameCollector implements IRVisitor {
   }
 
   private namespaces(def: QuintImport | QuintInstance | QuintExport): string[] {
-    return def.kind === 'instance'
-      ? // ? compact([this.currentModuleName, def.qualifiedName ? undefined : def.protoName]).join('::')
-        compact([def.qualifiedName ?? def.protoName, this.currentModuleName])
-      : def.defName
-      ? []
-      : [def.qualifiedName ?? def.protoName]
+    if (def.kind === 'instance') {
+      return compact([def.qualifiedName ?? def.protoName, this.currentModuleName])
+    }
+
+    return def.defName ? [] : [def.qualifiedName ?? def.protoName]
   }
 
   enterImport(def: QuintImport): void {

@@ -113,7 +113,6 @@ export interface ParserPhase2 extends ParserPhase1 {}
  */
 export interface ParserPhase3 extends ParserPhase2 {
   table: LookupTable
-  // definitionsByModule: DefinitionsByModule
 }
 
 /**
@@ -297,7 +296,7 @@ export function parsePhase2sourceResolution(
 export function parsePhase3importAndNameResolution(phase2Data: ParserPhase2): ParseResult<ParserPhase3> {
   return resolveNames(phase2Data.modules)
     .mapLeft(errors => errors.map(fromQuintError(phase2Data.sourceMap)))
-    .map(result => ({ ...phase2Data, ...result }))
+    .map(table => ({ ...phase2Data, table }))
 }
 
 /**
