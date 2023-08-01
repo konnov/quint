@@ -11,7 +11,7 @@ module TendermintModels {
     Proposer = Map(0 -> "p1", 1 -> "p2", 2 -> "p3", 3 -> "p4", 4 -> "p1")
   ) as n4_f1 from "./TendermintTest"
 
-  export n4_f1
+  // export n4_f1
 
   import TendermintTest(
     Corr = Set("p1", "p2", "p3"),
@@ -24,7 +24,7 @@ module TendermintModels {
     Proposer = Map(0 -> "p1", 1 -> "p2", 2 -> "p3", 3 -> "p4", 4 -> "p1")
   ) as n4_f2 from "./TendermintTest"
 
-  export n4_f2
+  // export n4_f2
 
   import TendermintTest(
     Corr = Set("p1", "p2", "p3"),
@@ -37,5 +37,5 @@ module TendermintModels {
     Proposer = Map(0 -> "p1", 1 -> "p2", 2 -> "p3", 3 -> "p4", 4 -> "p1")
   ) as n5_f2 from "./TendermintTest"
 
-  export n5_f2
+  // export n5_f2
 }
