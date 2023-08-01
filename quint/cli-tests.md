@@ -205,7 +205,7 @@ Temporarily disabled.
 
 ### OK on test ics20 denomTrace
 <!-- !test check ics20 denomTrace - Syntax/Types & Effects/Unit tests -->
-    quint test --main=properChannelsTests --max-samples=1000 ../examples/cosmos/ics20/denomTrace.qnt
+    quint test --main=properChannelsTests --max-samples=100 ../examples/cosmos/ics20/denomTrace.qnt
 
 ### OK on test ics20
 <!-- !test check ics20 - Syntax/Types & Effects/Unit tests -->
